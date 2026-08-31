@@ -5,8 +5,93 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import os
 
+#Classes
+class Player:
+    def __init__(self,name,money):
+        self.name = name
+        self.money = money
+        self.bet = 0
+        self.folded = False
+        self.allin = False
+        self.raw_cards = []
+        self.all_cards = []
+        self.show_cards = []
 
+    def resetround(self):
+        self.bet = 0
+        self.folded = False
+        self.allin = False
+        self.raw_cards=[]
+        self.all_cards=[]
+        self.show_cards=[]
 
+class Human(Player): # in case of future use
+    pass
+
+class Bot(Player):
+    def botcalc(curboard,curhand):
+        if(len(curboard)==0):
+            return 2
+        print(curboard)
+        board = [Card.new(c) for c in curboard]
+        hand = [Card.new(c) for c in curhand]
+        
+        rawscore = evaluator.evaluate(board,hand)
+        
+        #This returns a value between 1 and 7462 
+        chances = (1-(rawscore/7462))*100
+        print(f"{self.name} chances:",chances)
+        k = random.randint(1,100)
+        if(k<5):
+            return 3 #random raise
+        if(k<15):
+            return 2 #random call
+        if(chances<10):
+            return 0 #Fold
+        elif(chances<25):
+            return 1 #check
+        elif(chances<55):
+            return 2 #call
+        elif(chances<85):
+            return 3 #raise
+        else:
+            return 4 #All in
+    def botbet(curboard,curhand):
+        act = self.botcalc(curboard,self.show_cards)
+        print(f"{self.name} chose",act)
+        callcount = highestbet-self.bet
+        if(act <2 and callcount>0):
+            act=0
+        if(act == 0):
+            message = (f"{self.name} Folds")
+            oppFolded=True
+        elif(act == 1):
+            message =(f"{self.name} Check")
+        elif(act == 2):
+            amount = min(callcount, self.money)
+            self.money -=amount
+            self.bet+=amount
+            pot+=amount
+            if amount==0:
+                message = (f"{self.name} Checks")
+            else:
+                message = (f"{self.name} Calls")
+        elif(act==3):
+            raisecount = max(startingmoney//50,highestbet//5)
+            amountbet = min(callcount+raisecount,self.money)
+            self.money-=amountbet
+            self.bet+=amountbet
+            highestbet=self.bet
+            message=(f"{self.name} raises by {raisecount} sheckles")
+        elif(act ==4):
+            amount=self.money
+            self.money=0
+            self.bet+=amount
+            highestbet=max(highestbet,opponentbet)
+            self.allin = True
+            message=(f"{self.name.upper()} ALL IN")
+    
+    
 
 
 
@@ -17,26 +102,30 @@ Spades = ["s2","s3","s4","s5","s6","s7","s8","s9","s:","s;","s<","s=","s>"]
 Diamonds = ["d2","d3","d4","d5","d6","d7","d8","d9","d:","d;","d<","d=","d>"]
 possiblehands = ["High Card","pair","Two Pair","Trips","Straight","Flush","Full House","Quads","Straight Flush","Royal Flush"]
 deck = Clubs + hearts + Spades + Diamonds
-Yourmoney = 1000 #Make it a button later
-Opponentmoney = Yourmoney
-startingmoney = Yourmoney
+
+
+human = None
+bots = []
+
+
+startingmoney = 1000
 phase = "preflop"
-Yourbet = 0
-opponentbet = 0 
 highestbet = 0
 pot = 0
 evaluator = Evaluator()
-youstart = True
+mustbet = 50
+highestbet = 2*mustbet
+ui = False
+
 root = tk.Tk()
 canvas = tk.Canvas(root,width=1280,height=720,bg="#35654d")
 canvas.pack()
 cardrefs = []
-mustbet = 50
-highestbet = mustbet*2
-ui = False
+
 pot_text = your_money_text = opp_money_text = message_text = botactiontext = your_bet_text = None
 btn_frame = foldbutton = checkbutton = callbutton = raisebar = raisebutton = opponent_bet_text = None
-
+startbutton = startslider = numbots_slider = None
+boardcards = calccards = playercards_unused = None
 
 #All hand types functions
 def isroyalflush(L):
@@ -248,119 +337,51 @@ def checkhand(a):
         highest = max(cards,highest)
     return(0,)+tuple(highest)
 
-def compare():
-    global Yourmoney, Opponentmoney, pot
-    disablebuttons()
-    displaycards(opponentcards[:2],100)
-    playerhand = checkhand(playercards)
-    opponenthand = checkhand(opponentcards)
-    if playerhand>opponenthand:
-        show_message(f"Win:  {possiblehands[playerhand[0]]} vs {possiblehands[opponenthand[0]]}")
-        Yourmoney+=pot
-    elif playerhand<opponenthand:
-        show_message(f"Lose:  {possiblehands[playerhand[0]]} vs {possiblehands[opponenthand[0]]}")
-        Opponentmoney+=pot
-    else:
-        hand = possiblehands[playerhand[0]]
-        print("Both players have a",hand)
-        playercompare = playerhand[1:]
-        opponentcompare = opponenthand[1:]
-        if(playercompare>opponentcompare):
-            print("you win")
-            Yourmoney+=pot
-        elif(playercompare==opponentcompare):
-            print("Its a tie")
-            Yourmoney+=pot//2
-            Opponentmoney+=pot//2
-        else:
-            print("you lost")
-            Opponentmoney+=pot
-    updatelabels()
-    root.after(2000, newround)
+#ui work
+def showformat(card):
+    suit = card[0]
+    value = card[1]
+    tuffcardsmap = {":":"T",";":"J","<":"Q","=":"K",">":"A"}
+    return(tuffcardsmap.get(value,value)+suit)
+
+def botseat(i,n):
+    if n<=1:
+        return 520
+    spacing = 900//n
+    return 120+i*spacing
+
+
+
+
+
+
+
+
 
 
 #Opponent bet amounts  
     
-def botcalc(curboard,curhand):
-    if(len(curboard)==0):
-        return 2
-    print(curboard)
-    board = [Card.new(c) for c in curboard]
-    hand = [Card.new(c) for c in curhand]
-    
-    rawscore = evaluator.evaluate(board,hand)
-    
-    #This returns a value between 1 and 7462 
-    chances = (1-(rawscore/7462))*100
-    print("Bot chances:",chances)
-    k = random.randint(1,100)
-    if(k<5):
-        return 3 #random raise
-    if(k<15):
-        return 2 #random call
-    if(chances<10):
-        return 0 #Fold
-    elif(chances<25):
-        return 1 #check
-    elif(chances<55):
-        return 2 #call
-    elif(chances<85):
-        return 3 #raise
-    else:
-        return 4 #All in
-
-
-def botbet(curboard,curhand):
-    global oppFolded, Opponentmoney, pot, Botallin,highestbet,opponentbet
-    act = botcalc(curboard,curhand)
-    print("bot chose",act)
-    callcount = highestbet-opponentbet
-
-    global oppFolded,Opponentmoney,pot 
-
-    if(act <2 and callcount>0):
-        act=0
-    if(act == 0):
-        botmessage("Bot Folds")
-        oppFolded=True
-    elif(act == 1):
-        botmessage("Bot Check")
-    elif(act == 2):
-        amount = min(callcount, Opponentmoney)
-        Opponentmoney -=amount
-        opponentbet+=amount
-        pot+=amount
-        if amount==0:
-            botmessage("Bot Checks")
-        else:
-            botmessage("Bot Calls")
-    elif(act==3):
-        raisecount = max(startingmoney//50,highestbet//5)
-        amountbet = min(callcount+raisecount,Opponentmoney)
-        Opponentmoney-=amountbet
-        opponentbet+=amountbet
-        highestbet=opponentbet
-        botmessage(f"Bot raises by {raisecount} sheckles")
-    elif(act ==4):
-        amount=Opponentmoney
-        Opponentmoney=0
-        opponentbet+=amount
-        highestbet=max(highestbet,opponentbet)
-        Botallin = True
-        botmessage("BOT ALL IN")
-
 def botaction(): #Connects it with UI and display
-    global oppFolded, Opponentmoney, opponentbet, highestbet, pot,Yourmoney
-    botbet(calccards[:currentbettingstage()],botshow)
+    global highestbet,pot
+    messages =[]
+    for bot in bots:
+        if bot.folded or bot.allin:
+            continue
+        highestbet,pot,message = bot.botbet(calccards[:currentbettingstage()],highestbet,pot)
+        messages.append(message)
     updatelabels()
-    if(oppFolded):
-        Yourmoney+=pot
-        pot=0
+    botmessage(" | ".join(messages) if messages else "")
+
+    if all(bot.folded for bot in bots):
+        human.money += pot
+        pot = 0 
         updatelabels()
         disablebuttons()
-        botmessage("bot folded")
+        botmessage("All fold")
         root.after(2000,newround)
     refresh_buttons()
+
+
 
 #One round of betting, e.g flop vs river
 def currentbettingstage():
@@ -374,10 +395,11 @@ def currentbettingstage():
 
 #g
 def nextphase():
-    global phase, Yourbet, opponentbet, highestbet
-    Yourbet = 0
-    opponentbet = 0
-    highestbet = 0
+    global phase, highestbet
+    human.bet = 0
+    for bot in bots:
+        bot.bet =0
+    highestbet=0
     if phase == "preflop":
         phase = "flop"
         displaycards(boardcards[:3], 360)
@@ -393,7 +415,7 @@ def nextphase():
     elif phase == "river":
         phase = "showdown"
         compare()
-    if(Yourmoney<=0 or Opponentmoney<=0):
+    if(human.money<=0 or all(bot.money<=0 for bot in bots)):
         displaycards(boardcards,360)
         phase="showdown"
         compare()
@@ -417,8 +439,7 @@ def getcardimage(cardcode, width=80):
     print("size",img.size)
     return(ImageTk.PhotoImage(img))
 
-def displaycards(cards, ylevel, hidden=False):
-    startx = 300
+def displaycards(cards, ylevel, hidden=False,startx=300):
     for i,card in enumerate(cards):
         x = startx + i*120
         if hidden:
@@ -431,19 +452,19 @@ def displaycards(cards, ylevel, hidden=False):
 #Setting up labels and messages
 def refresh_buttons():    
     # Can only check if there's no bet to face
-    if(highestbet !=Yourbet):
+    if(highestbet !=human.bet):
         disablebutton(checkbutton)
     else:
         enablebutton(checkbutton)
     
     # Can only call if there's a bet to face and you have money
-    if(highestbet > Yourbet and Yourmoney > 0):
+    if(highestbet > human.bet and human.money > 0):
         enablebutton(callbutton)
     else:
         disablebutton(callbutton)
     
     # Can only raise if you have money beyond the call amount
-    can_raise = Yourmoney > (highestbet - Yourbet)
+    can_raise = human.money > (highestbet - human.bet)
     if(can_raise):
         enablebutton(raisebar)
         enablebutton(raisebutton)
@@ -452,11 +473,13 @@ def refresh_buttons():
         disablebutton(raisebutton)
 def updatelabels():
     canvas.itemconfig(pot_text,text=f"Pot: ${pot}")
-    canvas.itemconfig(your_money_text,text=f"Your money: ${Yourmoney}")
-    canvas.itemconfig(opp_money_text,text=f"Bot money: ${Opponentmoney}")
-    canvas.itemconfig(your_bet_text,text=f"your bet: ${Yourbet}")
-    canvas.itemconfig(opponent_bet_text,text=f"opponent bet: ${opponentbet}")
-    raisebar.config(to=Yourmoney-highestbet+Yourbet)
+    canvas.itemconfig(your_money_text,text=f"Your money: ${human.money}")
+    canvas.itemconfig(your_bet_text,text=f"your bet: ${human.bet}")
+    for bot in bots:
+        status = " (folded)" if bot.folded else ""
+        canvas.itemconfig(bot.money_text, text =f"{bot.name}: ${bot.money}{status}")
+        canvas.itemconfig(bot.bot_text,text=f"bet: ${bot.bet}")
+    raisebar.config(to=max(0,human.money-highestbet+human.bet))
 
 def show_message(msg):
     canvas.itemconfig(message_text,text=msg)
@@ -478,87 +501,89 @@ def enablebutton(btn):
 
 #Specific button actions
 def folding():
-    global youFolded, Opponentmoney, pot,oppFolded
-    if youFolded or oppFolded or phase == "showdown":
+    global  pot
+    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
         return
-    youFolded=True
-    Opponentmoney +=pot
+    human.folded =True
+    active = [bot for bot in bots if not bot.folded]
+    if active:
+        split = pot//len(active)
+        for bot in active:
+            bot.money +=split
     pot = 0
     updatelabels()
     disablebuttons()
     root.after(2000, newround)
 
 def checking():
-    global opponentbet, highestbet, youFolded, oppFolded
-    if youFolded or oppFolded or phase == "showdown":
+    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
         return
     show_message("You Check")
     botaction()
-    if oppFolded:
+    if all(bot.folded for bot in bots):
         return
-    if highestbet > Yourbet:           # bot raised — let player respond
-        show_message(f"Bot raised to ${highestbet}. Call, raise, or fold.")
+    if highestbet > human.bet:           # bot raised let player respond
+        show_message(f"A bot raised to ${highestbet}. Call, raise, or fold.")
     else:
         nextphase()
     refresh_buttons()
+
 def calling():
-    global Yourmoney, Yourbet, pot, youFolded, oppFolded
-    if youFolded or oppFolded or phase == "showdown":
+    global  pot
+    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
         return
-    amount = opponentbet-Yourbet
-    print(opponentbet)
-    print(Yourbet)
-    print(amount)
-    Yourmoney -= amount
-    Yourbet += amount
+    amount = highestbet-human.bet
+    human.money -= amount
+    human.bet += amount
     pot += amount
     updatelabels()
     nextphase()
     refresh_buttons()
     botaction()
+
 def raising():
-    global Yourmoney, Yourbet, highestbet, pot,youFolded,oppFolded
-    if youFolded or oppFolded or phase == "showdown":
+    global highestbet, pot
+    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
         return
     amount = raisebar.get()
     if amount == 0:
         show_message("Set a raise amount first")
         return
-    call_amount = highestbet - Yourbet
+    call_amount = highestbet - human.bet
     total = amount + call_amount
-    if total > Yourmoney:
+    if total > human.money:
         show_message("Not enough money")
         return
-    Yourmoney -= total
-    Yourbet += total
-    highestbet = Yourbet
+    human.money -= total
+    human.bet += total
+    highestbet = human.bet
     pot += total
     updatelabels()
     botaction()
     refresh_buttons()
-    if oppFolded:
+    if all(bot.folded for bot in bots):
         return
-    if highestbet > Yourbet:
-        botmessage(f"Bot re-raised to ${highestbet} Choose what to do")
+    if highestbet > human.bet:
+        botmessage(f"A bot re-raised to ${highestbet} Choose what to do")
     else:
         nextphase()
 
 
 #preparing variable function
 def startgame():
-    global Yourmoney, Opponentmoney, startingmoney
-    Yourmoney = startslider.get()
-    Opponentmoney = Yourmoney
-    startingmoney = Yourmoney
+    global human.money, Opponentmoney, startingmoney
+    human.money = startslider.get()
+    Opponentmoney = human.money
+    startingmoney = human.money
     canvas.delete("startscreen")
     startbutton.destroy()
     startslider.destroy()
     newround()
 #When someone goes broke, game ends and restarts
 def restartgame(msg):
-    global startbutton, startslider,ui,Yourmoney,Opponentmoney
+    global startbutton, startslider,ui,human.money,Opponentmoney
     ui=False
-    Yourmoney=0
+    human.money=0
     Opponentmoney=0
     show_message("")
     botmessage("")
@@ -583,13 +608,13 @@ def restartgame(msg):
 
 #essentially the main game loop
 def newround():
-    global phase, Yourbet, opponentbet, highestbet, pot, oppFolded, youFolded
+    global phase, human.bet, opponentbet, highestbet, pot, oppFolded, youFolded
     global Botallin, Youallin, boardcards, playercards, opponentcards
-    global botshow, calccards, deck, ui, Yourmoney, Opponentmoney
+    global botshow, calccards, deck, ui, human.money, Opponentmoney
     global pot_text, your_money_text, opp_money_text, message_text, botactiontext, your_bet_text
     global btn_frame, foldbutton, checkbutton, callbutton, raisebar, raisebutton, opponent_bet_text
     #extra precaution
-    if Yourmoney <= 0:
+    if human.money <= 0:
         restartgame("You Lost.")
         return
     if Opponentmoney <= 0:
@@ -615,7 +640,7 @@ def newround():
         checkbutton.pack(side="left", padx=5)
         callbutton = tk.Button(btn_frame, text="Call", width=10, bg="#27ae60", fg="white", command=calling)
         callbutton.pack(side="left", padx=5)
-        raisebar = tk.Scale(btn_frame, from_=0, to=Yourmoney, orient="horizontal", length=200,
+        raisebar = tk.Scale(btn_frame, from_=0, to=human.money, orient="horizontal", length=200,
                             bg="#35654d", fg="white", label="Raise $", resolution=1, digits=1, takefocus=1)
         raisebar.pack(side="left", padx=5)
         raisebutton = tk.Button(btn_frame, text="Raise", width=10, bg="#f39c12", fg="white", command=raising)
@@ -623,7 +648,7 @@ def newround():
 
     # initializing cards
     phase = "preflop"
-    Yourbet = 0
+    human.bet = 0
     opponentbet = 0
     highestbet = mustbet * 2
     pot = 0
@@ -688,13 +713,13 @@ def newround():
         calccards.append(card+suit)
 
     #Starting the money
-    Yourmoney -= mustbet
+    human.money -= mustbet
     Opponentmoney -= mustbet * 2
-    Yourbet += mustbet
+    human.bet += mustbet
     opponentbet += mustbet * 2
     pot += mustbet * 3
 
-    if Yourmoney <= 0 or Opponentmoney <= 0:
+    if human.money <= 0 or Opponentmoney <= 0:
         
         if Opponentmoney < 0:
             winner = "You Won!" 
