@@ -5,18 +5,7 @@ import tkinter as tk
 from PIL import Image, ImageTk
 import os
 
-'''
-Poker Game
-ICS3U-01
-Final Project
-Justin Zhou 
 
-Code has a basic alogorithm to play poker against, being able to measure all hands
-Imports treys  to measure equity in order for opponent to have an algorithm
-Imports Tkinter and Pillow for easy access to images and UI features since this is a nice to have and not a must have, making me need to do less work
-Note that to run you have to do pip install treys on your end
-Also need to do pip install Pillow for Card images 
-'''
 
 
 
