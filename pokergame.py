@@ -568,7 +568,7 @@ def raising():
     else:
         nextphase()
 
-
+#ended here
 #preparing variable function
 def startgame():
     global human.money, Opponentmoney, startingmoney
@@ -579,6 +579,8 @@ def startgame():
     startbutton.destroy()
     startslider.destroy()
     newround()
+
+
 #When someone goes broke, game ends and restarts
 def restartgame(msg):
     global startbutton, startslider,ui,human.money,Opponentmoney
