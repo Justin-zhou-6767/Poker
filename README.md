@@ -47,4 +47,4 @@ however no matter the starting amount, there is always a small blind and big bli
 There is displays towards the top and bottom to show the remaining amount of money for both players, as well as what the bot is doing on the right and what phase it is of a round. 
 The game itself is very intuitive. 
 
-Start by just running the play button, good luck. 
+Start by just running pokergame.py
