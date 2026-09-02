@@ -8,6 +8,7 @@ import os
 #Classes
 class Player:
     def __init__(self,name,money):
+        
         self.name = name
         self.money = money
         self.bet = 0
@@ -22,6 +23,8 @@ class Player:
         self.folded = False
         self.allin = False
         self.raw_cards=[]
+        self.smallblind = False
+        self.bigblind = False
         self.all_cards=[]
         self.show_cards=[]
 
@@ -29,7 +32,7 @@ class Human(Player): # in case of future use
     pass
 
 class Bot(Player):
-    def botcalc(curboard,curhand):
+    def botcalc(self,curboard,curhand):
         if(len(curboard)==0):
             return 2
         print(curboard)
@@ -56,7 +59,8 @@ class Bot(Player):
             return 3 #raise
         else:
             return 4 #All in
-    def botbet(curboard,curhand):
+    def botbet(self,curboard,highestbet,pot):
+        oldhighest = highestbet
         act = self.botcalc(curboard,self.show_cards)
         print(f"{self.name} chose",act)
         callcount = highestbet-self.bet
@@ -64,7 +68,7 @@ class Bot(Player):
             act=0
         if(act == 0):
             message = (f"{self.name} Folds")
-            oppFolded=True
+            self.folded=True
         elif(act == 1):
             message =(f"{self.name} Check")
         elif(act == 2):
@@ -87,10 +91,11 @@ class Bot(Player):
             amount=self.money
             self.money=0
             self.bet+=amount
-            highestbet=max(highestbet,opponentbet)
+            highestbet=max(highestbet,self.bet)
             self.allin = True
             message=(f"{self.name.upper()} ALL IN")
-    
+        israise = highestbet>oldhighest
+        return(highestbet,pot,message,israise)
     
 
 
@@ -103,10 +108,15 @@ Diamonds = ["d2","d3","d4","d5","d6","d7","d8","d9","d:","d;","d<","d=","d>"]
 possiblehands = ["High Card","pair","Two Pair","Trips","Straight","Flush","Full House","Quads","Straight Flush","Royal Flush"]
 deck = Clubs + hearts + Spades + Diamonds
 
-
+smallblindindex =0
+smallblindseat = 0
+bigblindseat = 1
+seatorder = []
+turnindex = 0
+actedsinceraise = set()
 human = None
 bots = []
-
+smallblindindex = 0
 
 startingmoney = 1000
 phase = "preflop"
@@ -350,9 +360,162 @@ def botseat(i,n):
     spacing = 900//n
     return 120+i*spacing
 
+def contenders():
+    return [p for p in seatorder if not p.folded]
 
+def active_players():
+    return [p for p in seatorder if not p.folded and p.money > 0]
 
+def betting_round_over():
+    act = active_players()
+    if len(act) <= 1:
+        return True
+    return all(p in actedsinceraise and p.bet == highestbet for p in act)
 
+def advance_turn():
+    global turnindex
+    n = len(seatorder)
+    for _ in range(n):
+        turnindex = (turnindex+1) % n
+        p = seatorder[turnindex]
+        if not p.folded and p.money > 0:
+            return
+
+def first_to_act_index(after_idx):
+    idx = after_idx
+    n = len(seatorder)
+    for _ in range(n):
+        idx = (idx+1) % n
+        p = seatorder[idx]
+        if not p.folded and p.money > 0:
+            return idx
+    return after_idx
+
+def first_to_act_index_inclusive(start_idx):
+    idx = start_idx
+    n = len(seatorder)
+    for _ in range(n):
+        p = seatorder[idx]
+        if not p.folded and p.money > 0:
+            return idx
+        idx = (idx+1) % n
+    return start_idx
+
+def record_check_or_call(player):
+    actedsinceraise.add(player)
+
+def record_raise(player):
+    actedsinceraise.clear()
+    actedsinceraise.add(player)
+
+def check_win_by_fold():
+    global pot
+    c = contenders()
+    if len(c) == 1:
+        c[0].money += pot
+        pot = 0
+        updatelabels()
+        disablebuttons()
+        botmessage(f"{c[0].name} wins (everyone else folded)")
+        root.after(2000, newround)
+        return True
+    return False
+
+def run_bot_turns():
+    global highestbet, pot
+    messages = []
+    while not betting_round_over():
+        current = seatorder[turnindex]
+        if current is human:
+            break
+        if current.folded or current.money <= 0:
+            advance_turn()
+            continue
+        highestbet,pot,message,is_raise = current.botbet(calccards[:currentbettingstage()], highestbet, pot)
+        messages.append(message)
+        if is_raise:
+            record_raise(current)
+        else:
+            record_check_or_call(current)
+        if check_win_by_fold():
+            return
+        advance_turn()
+    updatelabels()
+    if messages:
+        botmessage(" | ".join(messages))
+
+def begin_betting_round(preflop=False):
+    global turnindex, actedsinceraise
+    actedsinceraise = set()
+    if preflop:
+        turnindex = first_to_act_index(bigblindseat)
+    else:
+        turnindex = first_to_act_index_inclusive(smallblindseat)
+    run_bot_turns()
+    if check_win_by_fold():
+        return
+    if betting_round_over():
+        advance_to_next_street()
+    else:
+        refresh_buttons()
+
+def advance_to_next_street():
+    global phase, highestbet
+    for p in seatorder:
+        p.bet = 0
+    highestbet = 0
+    if phase == "preflop":
+        phase = "flop"
+        displaycards(boardcards[:3], 360)
+        show_message("Flop")
+        begin_betting_round()
+    elif phase == "flop":
+        phase = "turn"
+        displaycards(boardcards[:4], 360)
+        show_message("Turn")
+        begin_betting_round()
+    elif phase == "turn":
+        phase = "river"
+        displaycards(boardcards, 360)
+        show_message("River")
+        begin_betting_round()
+    elif phase == "river":
+        phase = "showdown"
+        compare()
+
+def compare():
+    disablebuttons()
+    n = len(bots)
+    for i, bot in enumerate(bots):
+        displaycards(bot.show_cards, 100, startx=botseat(i,n))
+
+    contenders = [p for p in ([human]+bots) if not p.folded]
+    besthand = None
+    winners = []
+    for p in contenders:
+        h = checkhand(p.all_cards)
+        if besthand is None or h > besthand:
+            besthand = h
+            winners = [p]
+        elif h == besthand:
+            winners.append(p)
+
+    split = pot//len(winners)
+    for w in winners:
+        w.money += split
+
+    hand = possiblehands[besthand[0]]
+    if len(winners)==1:
+        if winners[0] is human:
+            show_message(f"You win with {hand}!")
+        else:
+            show_message(f"{winners[0].name} wins with {hand}")
+    else:
+        names = ", ".join(w.name for w in winners)
+        show_message(f"Tie ({hand}): {names}")
+
+    updatelabels()
+    root.after(2000, newround)
 
 
 
@@ -360,27 +523,6 @@ def botseat(i,n):
 
 
 #Opponent bet amounts  
-    
-def botaction(): #Connects it with UI and display
-    global highestbet,pot
-    messages =[]
-    for bot in bots:
-        if bot.folded or bot.allin:
-            continue
-        highestbet,pot,message = bot.botbet(calccards[:currentbettingstage()],highestbet,pot)
-        messages.append(message)
-    updatelabels()
-    botmessage(" | ".join(messages) if messages else "")
-
-    if all(bot.folded for bot in bots):
-        human.money += pot
-        pot = 0 
-        updatelabels()
-        disablebuttons()
-        botmessage("All fold")
-        root.after(2000,newround)
-    refresh_buttons()
-
 
 
 #One round of betting, e.g flop vs river
@@ -393,32 +535,6 @@ def currentbettingstage():
         return 4
     return 5
 
-#g
-def nextphase():
-    global phase, highestbet
-    human.bet = 0
-    for bot in bots:
-        bot.bet =0
-    highestbet=0
-    if phase == "preflop":
-        phase = "flop"
-        displaycards(boardcards[:3], 360)
-        show_message("Flop")
-    elif phase == "flop":
-        phase = "turn"
-        displaycards(boardcards[:4], 360)
-        show_message("Turn")
-    elif phase == "turn":
-        phase = "river"
-        displaycards(boardcards, 360)
-        show_message("River")
-    elif phase == "river":
-        phase = "showdown"
-        compare()
-    if(human.money<=0 or all(bot.money<=0 for bot in bots)):
-        displaycards(boardcards,360)
-        phase="showdown"
-        compare()
 
 
 
@@ -451,6 +567,9 @@ def displaycards(cards, ylevel, hidden=False,startx=300):
 
 #Setting up labels and messages
 def refresh_buttons():    
+    if seatorder[turnindex] is not human:
+        disablebuttons()
+        return
     # Can only check if there's no bet to face
     if(highestbet !=human.bet):
         disablebutton(checkbutton)
@@ -475,10 +594,12 @@ def updatelabels():
     canvas.itemconfig(pot_text,text=f"Pot: ${pot}")
     canvas.itemconfig(your_money_text,text=f"Your money: ${human.money}")
     canvas.itemconfig(your_bet_text,text=f"your bet: ${human.bet}")
+    canvas.itemconfig(human.blind_text, text="BB" if human.bigblind else ("SB" if human.smallblind else ""))
     for bot in bots:
         status = " (folded)" if bot.folded else ""
         canvas.itemconfig(bot.money_text, text =f"{bot.name}: ${bot.money}{status}")
-        canvas.itemconfig(bot.bot_text,text=f"bet: ${bot.bet}")
+        canvas.itemconfig(bot.bet_text,text=f"bet: ${bot.bet}")
+        canvas.itemconfig(bot.blind_text, text="BB" if bot.bigblind else ("SB" if bot.smallblind else ""))
     raisebar.config(to=max(0,human.money-highestbet+human.bet))
 
 def show_message(msg):
@@ -501,49 +622,56 @@ def enablebutton(btn):
 
 #Specific button actions
 def folding():
-    global  pot
-    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
+    if seatorder[turnindex] is not human or human.folded or phase == "showdown":
         return
-    human.folded =True
-    active = [bot for bot in bots if not bot.folded]
-    if active:
-        split = pot//len(active)
-        for bot in active:
-            bot.money +=split
-    pot = 0
-    updatelabels()
-    disablebuttons()
-    root.after(2000, newround)
+    human.folded = True
+    advance_turn()
+    run_bot_turns()
+    if check_win_by_fold():
+        return
+    if betting_round_over():
+        advance_to_next_street()
+    else:
+        refresh_buttons()
 
 def checking():
-    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
+    if seatorder[turnindex] is not human or human.folded or phase == "showdown":
+        return
+    if highestbet != human.bet:
         return
     show_message("You Check")
-    botaction()
-    if all(bot.folded for bot in bots):
+    record_check_or_call(human)
+    advance_turn()
+    run_bot_turns()
+    if check_win_by_fold():
         return
-    if highestbet > human.bet:           # bot raised let player respond
-        show_message(f"A bot raised to ${highestbet}. Call, raise, or fold.")
+    if betting_round_over():
+        advance_to_next_street()
     else:
-        nextphase()
-    refresh_buttons()
+        refresh_buttons()
 
 def calling():
-    global  pot
-    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
+    global pot
+    if seatorder[turnindex] is not human or human.folded or phase == "showdown":
         return
     amount = highestbet-human.bet
     human.money -= amount
     human.bet += amount
     pot += amount
     updatelabels()
-    nextphase()
-    refresh_buttons()
-    botaction()
+    record_check_or_call(human)
+    advance_turn()
+    run_bot_turns()
+    if check_win_by_fold():
+        return
+    if betting_round_over():
+        advance_to_next_street()
+    else:
+        refresh_buttons()
 
 def raising():
     global highestbet, pot
-    if human.folded or all(bot.folded for bot in bots) or phase == "showdown":
+    if seatorder[turnindex] is not human or human.folded or phase == "showdown":
         return
     amount = raisebar.get()
     if amount == 0:
@@ -559,34 +687,36 @@ def raising():
     highestbet = human.bet
     pot += total
     updatelabels()
-    botaction()
-    refresh_buttons()
-    if all(bot.folded for bot in bots):
+    record_raise(human)
+    advance_turn()
+    run_bot_turns()
+    if check_win_by_fold():
         return
-    if highestbet > human.bet:
-        botmessage(f"A bot re-raised to ${highestbet} Choose what to do")
+    if betting_round_over():
+        advance_to_next_street()
     else:
-        nextphase()
+        refresh_buttons()
 
 #ended here
 #preparing variable function
 def startgame():
-    global human.money, Opponentmoney, startingmoney
-    human.money = startslider.get()
-    Opponentmoney = human.money
-    startingmoney = human.money
+    global human, bots, startingmoney
+    money = startslider.get()
+    n = numbots_slider.get()
+    startingmoney = money
+    human = Human("You", money)
+    bots = [Bot(f"Bot {i+1}", money) for i in range(n)]
     canvas.delete("startscreen")
     startbutton.destroy()
     startslider.destroy()
+    numbots_slider.destroy()
     newround()
 
 
 #When someone goes broke, game ends and restarts
 def restartgame(msg):
-    global startbutton, startslider,ui,human.money,Opponentmoney
+    global startbutton, startslider,ui,numbots_slider
     ui=False
-    human.money=0
-    Opponentmoney=0
     show_message("")
     botmessage("")
     canvas.delete("card")
@@ -602,37 +732,50 @@ def restartgame(msg):
     startslider.set(1000)
     canvas.create_window(640, 400, window=startslider, tags="startscreen")
 
+    numbots_slider = tk.Scale(root, from_=1, to=5, orient="horizontal", 
+                              length=200, bg="#35654d", fg="white", font =("Arial",14),
+                              label="Number of Bots")
+    numbots_slider.set(1)
+    canvas.create_window(640,455,window=numbots_slider,tags="startscreen")
+
     startbutton = tk.Button(root, text="Play Again", width=15, font=("Arial", 16),
                             bg="#f39c12", fg="white", command=startgame)
-    canvas.create_window(640, 470, window=startbutton, tags="startscreen")
+    canvas.create_window(640, 515, window=startbutton, tags="startscreen")
 
     disablebuttons()
 
 #essentially the main game loop
 def newround():
-    global phase, human.bet, opponentbet, highestbet, pot, oppFolded, youFolded
-    global Botallin, Youallin, boardcards, playercards, opponentcards
-    global botshow, calccards, deck, ui, human.money, Opponentmoney
-    global pot_text, your_money_text, opp_money_text, message_text, botactiontext, your_bet_text
-    global btn_frame, foldbutton, checkbutton, callbutton, raisebar, raisebutton, opponent_bet_text
+    global phase, highestbet, pot, ui,smallblindindex
+    global boardcards, calccards, deck, bots, bigblindseat, smallblindseat
+    global pot_text, your_money_text, message_text, botactiontext, your_bet_text
+    global btn_frame, foldbutton, checkbutton, callbutton, raisebar, raisebutton
     #extra precaution
     if human.money <= 0:
         restartgame("You Lost.")
         return
-    if Opponentmoney <= 0:
+    bots = [b for b in bots if b.money>0]
+    if not bots:
         restartgame("You Won!")
         return
+    global seatorder
+    seatorder=[human]+bots
 
     # UI creation without doing it too much
     if not ui:
         ui = True
         pot_text = canvas.create_text(640, 260, text="Pot: $0", fill="white", font=("Arial", 20),tags="gameui")
         your_money_text = canvas.create_text(640, 620, text="Your money: $1000", fill="white", font=("Arial", 16),tags="gameui")
-        opp_money_text = canvas.create_text(640, 40, text="Bot money: $1000", fill="white", font=("Arial", 16),tags="gameui")
         message_text = canvas.create_text(1040, 500, text="", fill="yellow", font=("Arial", 18),tags="gameui")
         botactiontext = canvas.create_text(1040, 567, text="", fill="yellow", font=("Arial", 18),tags="gameui")
         your_bet_text = canvas.create_text(1040,620,text="Your bet: $100", fill="white", font=("Arial", 16),tags="gameui")
-        opponent_bet_text = canvas.create_text(1040,40,text="opponent bet: $50", fill="white", font=("Arial", 16),tags="gameui")
+        human.blind_text = canvas.create_text(1040,600,text="", fill="yellow", font=("Arial", 12),tags="gameui")
+        n = len(bots)
+        for i, bot in enumerate(bots):
+            x = botseat(i,n)+60
+            bot.money_text = canvas.create_text(x, 20, text=bot.name, fill="white", font=("Arial", 14),tags="gameui")
+            bot.bet_text = canvas.create_text(x,175,text="bet: $0", fill="white", font=("Arial", 14),tags="gameui")
+            bot.blind_text = canvas.create_text(x,35,text="", fill="yellow", font=("Arial", 12),tags="gameui")
         btn_frame = tk.Frame(root, bg="#35654d")
         canvas.create_window(640, 690, window=btn_frame,tags="gameui")
 
@@ -650,14 +793,10 @@ def newround():
 
     # initializing cards
     phase = "preflop"
-    human.bet = 0
-    opponentbet = 0
-    highestbet = mustbet * 2
-    pot = 0
-    oppFolded = False
-    youFolded = False
-    Botallin = False
-    Youallin = False
+    human.resetround()
+    for bot in bots:
+        bot.resetround()
+    
 
     # Deal cards every round
     deck = Clubs + hearts + Spades + Diamonds
@@ -666,86 +805,72 @@ def newround():
         k = random.randint(0,len(deck)-1)
         boardcards.append(deck[k])
         deck.pop(k)
-    playercards = []
+    human.raw_cards = []
     for i in range(2):
         k = random.randint(0,len(deck)-1)
-        playercards.append(deck[k])
+        human.raw_cards.append(deck[k])
         deck.pop(k)
-    opponentcards = []
-    for i in range(2):
-        k = random.randint(0,len(deck)-1)
-        opponentcards.append(deck[k])
-        deck.pop(k)
-    playercards+=boardcards
-    opponentcards+=boardcards
+    for bot in bots:
+        bot.raw_cards=[]
+        for i in range(2):
+            k = random.randint(0,len(deck)-1)
+            bot.raw_cards.append(deck[k])
+            deck.pop(k)
+    human.all_cards=human.raw_cards+boardcards
+    for bot in bots:
+        bot.all_cards= bot.raw_cards+boardcards
+    for bot in bots:
+        bot.show_cards=[showformat(c) for c in bot.raw_cards]
+    calccards = [showformat(c) for c in boardcards]
 
-    showopponentcards = []
-    for i in opponentcards:
-        suit = i[0]
-        card = i[1]
-        if(ord(card)>57):
-            if(card == ":"):
-                card = "T"
-            elif(card == ";"):
-                card = "J"
-            elif(card == "<"):
-                card = "Q"
-            elif(card == "="):
-                card = "K"
-            else:
-                card = "A"
-        showopponentcards.append(card+suit)
-    botshow = showopponentcards[:2]
+    smallblindindex = smallblindindex % len(seatorder)
+    smallblindseat = smallblindindex
+    bigblindseat = (smallblindseat+1) % len(seatorder)
+    for p in seatorder:
+        p.smallblind = False
+        p.bigblind = False
+    seatorder[smallblindseat].smallblind = True
+    seatorder[smallblindseat].money -= mustbet
+    seatorder[smallblindseat].bet += mustbet
+    pot += mustbet
+    seatorder[bigblindseat].bigblind = True
+    seatorder[bigblindseat].money -= mustbet*2
+    seatorder[bigblindseat].bet += mustbet*2
+    pot += mustbet*2
+    highestbet = mustbet*2
+    smallblindindex = (smallblindindex+1) % len(seatorder)
 
-    calccards = []
-    for i in boardcards:
-        suit = i[0]
-        card = i[1]
-        if(ord(card)>57):
-            if(card == ":"):
-                card = "T"
-            elif(card == ";"):
-                card = "J"
-            elif(card == "<"):
-                card = "Q"
-            elif(card == "="):
-                card = "K"
-            else:
-                card = "A"
-        calccards.append(card+suit)
 
-    #Starting the money
-    human.money -= mustbet
-    Opponentmoney -= mustbet * 2
-    human.bet += mustbet
-    opponentbet += mustbet * 2
-    pot += mustbet * 3
-
-    if human.money <= 0 or Opponentmoney <= 0:
-        
-        if Opponentmoney < 0:
-            winner = "You Won!" 
+    if(human.money<=0 or all(bot.money<=0 for bot in bots)):
+        if all(bot.money<=0 for bot in bots):
+            display = "you win"
         else:
-            winner = "You Lost."
-        restartgame(winner)
+            display = "you lose"
+        restartgame(display)
         return
     canvas.delete("card")
-    displaycards(playercards[:2], 500)
-    displaycards(opponentcards[:2], 100, hidden=True)
+    displaycards(human.raw_cards, 500)
+    n = len(bots)
+    for i,bot in enumerate(bots):
+        displaycards(bot.raw_cards, 100, hidden=True,startx=botseat(i,n))
     updatelabels()
     show_message("preflop")
-    refresh_buttons()
+    begin_betting_round(preflop=True)
 
 
 
 #Initialization of startscreen
 
-canvas.create_text(640, 280, text="Poker Game", fill="white", font=("Arial", 48), tags="startscreen")
+canvas.create_text(640, 140, text="Poker Game", fill="white", font=("Arial", 48), tags="startscreen")
 canvas.create_text(640, 340, text="Choose starting amount:", fill="white", font=("Arial", 20), tags="startscreen")
 
 startslider = tk.Scale(root, from_=500, to=5000, orient="horizontal",length=300, resolution=50, bg="#35654d", fg="white",font=("Arial", 14))
 startslider.set(1000)
 canvas.create_window(640, 400, window=startslider, tags="startscreen")
+
+numbots_slider = tk.Scale(root,from_=1,to=5,orient="horizontal",length=200,bg="#35654d",fg = "white",font=("Arial",14),label="Number of Bots")
+numbots_slider.set(1)
+canvas.create_window(640,255,window=numbots_slider,tags="startscreen")
 
 startbutton = tk.Button(root, text="Start Game", width=15, font=("Arial", 16),bg="#f39c12", fg="white", command=startgame)
 canvas.create_window(640, 470, window=startbutton, tags="startscreen")
